@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.5
+
+- The `probe_camera` diagnostic also tries substreams 3, 100, 5 and 6. The
+  official app's live command uses the selected resolution's index (1-4) and
+  100 for super HD, which the first probe did not cover.
+
 ## 1.3.4
 
 - Adds the optional `probe_camera` diagnostic. At startup it tries live
