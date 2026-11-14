@@ -73,6 +73,14 @@ stopped: `1` nothing arrived on the video channel, `2` an unrecognised frame
 header (`last_magic` and `last_frame_type` describe it), `3` an invalid frame
 length, `5` a frame was cut short, `6` the viewer went away, `7` a normal stop.
 
+## Diagnosing a camera with no video
+
+Set `probe_camera` to a camera alias and restart the app. The log then shows
+one `channel_probe` line per live substream, for example
+`channel_probe camera=side substream=2 start_sent=true ch1=812345b/magic=a815aa55/type=16`.
+`channels=none` means the camera sent nothing for that substream. Clear the
+option again afterwards; the probe takes about half a minute at every start.
+
 ## Starting the app
 
 Save the configuration and start the app. Automatic startup is enabled by
