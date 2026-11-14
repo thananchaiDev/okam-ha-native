@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.3.3
+
+- Keeps each camera's stream URL valid across app restarts and updates. The
+  media token was random per start, so every camera answered 401 after an
+  update until the integration was reloaded.
+- Makes H.265 cameras play. The bundled FFmpeg had no H.265 support, so 1.3.2
+  could not mux their video. It now decodes H.265 and re-encodes it to H.264
+  (at most 1280 px wide), which every browser and Home Assistant's WebRTC
+  path can play. This uses more CPU while such a camera is being viewed.
+  The bundled FFmpeg is now built with x264 and is therefore GPL-licensed.
+
 ## 1.3.2
 
 - Streams cameras that encode H.265. The native helper now forwards H.265
