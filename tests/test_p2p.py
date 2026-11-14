@@ -319,3 +319,42 @@ def test_diagnostic_line_renders_silent_login_candidates() -> None:
     )
 
     assert "login_attempts=-1,none" in diagnostic_line(result)
+
+
+def test_channel_probe_lines_are_sanitized_and_per_substream() -> None:
+    from okam_native.p2p import channel_probe_lines
+
+    payload = {
+        "connected": True,
+        "authenticated": True,
+        "login_result": 0,
+        "uid": "SECRET-UID",
+        "probes": [
+            {"substream": 2, "start_sent": True, "channels": []},
+            {
+                "substream": 4,
+                "start_sent": True,
+                "channels": [
+                    {"channel": 2, "bytes": 51200, "magic": 0xA815AA55, "type": 16},
+                    {"channel": 3, "bytes": 1024, "magic": 1, "type": 0},
+                ],
+            },
+        ],
+    }
+    lines = channel_probe_lines("side", payload)
+    assert lines[0] == "channel_probe camera=side connected=true authenticated=true login_result=0"
+    assert lines[1] == "channel_probe camera=side substream=2 start_sent=true channels=none"
+    assert lines[2] == (
+        "channel_probe camera=side substream=4 start_sent=true "
+        "ch2=51200b/magic=a815aa55/type=16 ch3=1024b/magic=00000001/type=0"
+    )
+    assert all("SECRET-UID" not in line for line in lines)
+
+
+def test_channel_probe_lines_tolerate_a_failed_login() -> None:
+    from okam_native.p2p import channel_probe_lines
+
+    lines = channel_probe_lines("side", {"connected": True, "authenticated": False, "login_result": -1})
+    assert lines == [
+        "channel_probe camera=side connected=true authenticated=false login_result=-1"
+    ]

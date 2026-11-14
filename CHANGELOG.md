@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.4
+
+- Adds the optional `probe_camera` diagnostic. At startup it tries live
+  substreams 2, 1, 0 and 4 on that camera and logs, per substream, which P2P
+  channels carried data, how much, and each channel's first frame-header word
+  and type. It is meant for multi-lens cameras that authenticate but send no
+  video on the usual channel.
+
 ## 1.3.3
 
 - Keeps each camera's stream URL valid across app restarts and updates. The

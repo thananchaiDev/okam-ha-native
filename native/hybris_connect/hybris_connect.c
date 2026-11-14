@@ -332,15 +332,95 @@ static bool forward_video_frames(client_read_fn client_read, void *client,
     return *frames > 0 || *h265_frames > 0;
 }
 
+#define PROBE_CHANNELS 8
+#define PROBE_SECONDS 6
+#define PROBE_READ_TIMEOUT_MS 20
+#define PROBE_BUFFER_BYTES (64U * 1024U)
+
+static const int probe_substreams[] = {2, 1, 0, 4};
+#define PROBE_SUBSTREAM_COUNT (sizeof(probe_substreams) / sizeof(probe_substreams[0]))
+
+typedef struct {
+    unsigned long long bytes[PROBE_CHANNELS];
+    uint32_t first_magic[PROBE_CHANNELS];
+    unsigned int first_type[PROBE_CHANNELS];
+    bool start_sent;
+} channel_probe_result;
+
+/* Drain every channel for a while, counting bytes and remembering only the
+ * first frame header word and type byte per channel. No payload is kept. */
+static void drain_channels(client_read_fn client_read, void *client,
+                           unsigned char *buffer, int seconds,
+                           channel_probe_result *result) {
+    time_t deadline = time(NULL) + seconds;
+    while (time(NULL) < deadline) {
+        for (int channel = 1; channel < PROBE_CHANNELS; ++channel) {
+            int received = 0;
+            client_read(client, channel, buffer, (int)PROBE_BUFFER_BYTES,
+                        PROBE_READ_TIMEOUT_MS, &received);
+            if (received <= 0 || (size_t)received > PROBE_BUFFER_BYTES) continue;
+            if (result != NULL) {
+                if (result->bytes[channel] == 0 && received >= 5) {
+                    result->first_magic[channel] = read_le32(buffer);
+                    result->first_type[channel] = buffer[4];
+                }
+                result->bytes[channel] += (unsigned long long)received;
+            }
+            memset(buffer, 0, (size_t)received);
+        }
+    }
+}
+
+/* Try each known live substream and report which channels carry data. Used to
+ * learn how multi-sensor cameras deliver video. */
+static void probe_live_channels(client_read_fn client_read, client_write_cgi_fn client_write_cgi,
+                                void *client, channel_probe_result *results) {
+    unsigned char *buffer = malloc(PROBE_BUFFER_BYTES);
+    if (buffer == NULL) return;
+    for (size_t index = 0; index < PROBE_SUBSTREAM_COUNT; ++index) {
+        char command[96];
+        snprintf(command, sizeof(command), "livestream.cgi?streamid=10&substream=%d&",
+                 probe_substreams[index]);
+        results[index].start_sent = client_write_cgi(client, command, 5000);
+        if (results[index].start_sent) {
+            drain_channels(client_read, client, buffer, PROBE_SECONDS, &results[index]);
+        }
+        client_write_cgi(client, "livestream.cgi?streamid=16&substream=0&", 5000);
+        drain_channels(client_read, client, buffer, 1, NULL);
+    }
+    free(buffer);
+}
+
+static void print_channel_probe(const channel_probe_result *results) {
+    printf(",\"probes\":[");
+    for (size_t index = 0; index < PROBE_SUBSTREAM_COUNT; ++index) {
+        printf("%s{\"substream\":%d,\"start_sent\":%s,\"channels\":[",
+               index ? "," : "", probe_substreams[index],
+               results[index].start_sent ? "true" : "false");
+        bool first = true;
+        for (int channel = 1; channel < PROBE_CHANNELS; ++channel) {
+            if (results[index].bytes[channel] == 0) continue;
+            printf("%s{\"channel\":%d,\"bytes\":%llu,\"magic\":%u,\"type\":%u}",
+                   first ? "" : ",", channel, results[index].bytes[channel],
+                   (unsigned int)results[index].first_magic[channel],
+                   results[index].first_type[channel]);
+            first = false;
+        }
+        printf("]}");
+    }
+    printf("]");
+}
+
 int main(int argc, char **argv) {
+    bool channel_probe = argc == 3 && strcmp(argv[2], "--channel-probe") == 0;
     bool stream_test = argc == 3 && strcmp(argv[2], "--stream-test") == 0;
     bool stream_stdout = argc == 3 && strcmp(argv[2], "--stream-stdout") == 0;
     bool live_mode = stream_test || stream_stdout;
-    bool authenticate = live_mode ||
+    bool authenticate = live_mode || channel_probe ||
         (argc == 3 && strcmp(argv[2], "--authenticate") == 0);
     if (argc != 2 && !authenticate) {
         fputs("usage: okam-hybris-connect /path/to/libOKSMARTPPCS.so "
-              "[--authenticate|--stream-test|--stream-stdout]\n", stderr);
+              "[--authenticate|--stream-test|--stream-stdout|--channel-probe]\n", stderr);
         return 2;
     }
     char *uid = read_field();
@@ -397,7 +477,7 @@ int main(int argc, char **argv) {
         fputs("official native P2P authentication API is incomplete\n", stderr);
         return 3;
     }
-    if (live_mode && client_write_cgi == NULL) {
+    if ((live_mode || channel_probe) && client_write_cgi == NULL) {
         android_dlclose(library);
         free(uid);
         free(service_parameter);
@@ -428,6 +508,8 @@ int main(int argc, char **argv) {
     unsigned int stream_end_reason = STREAM_END_NONE;
     uint32_t last_magic = 0;
     unsigned int last_frame_type = 0;
+    channel_probe_result probe_results[PROBE_SUBSTREAM_COUNT];
+    memset(probe_results, 0, sizeof(probe_results));
     if (client != NULL) {
         state = client_connect(client, CONNECT_TYPE_NORMAL, service_parameter, 0);
         connected = state == CONNECT_STATE_ONLINE;
@@ -438,6 +520,9 @@ int main(int argc, char **argv) {
                     client_read, client, &login_command, &login_result);
                 authenticated = login_response_received && login_result == 0;
             }
+        }
+        if (connected && authenticated && channel_probe) {
+            probe_live_channels(client_read, client_write_cgi, client, probe_results);
         }
         if (connected && authenticated && live_mode) {
             stream_start_sent = client_write_cgi(
@@ -501,6 +586,15 @@ int main(int argc, char **argv) {
                h264_received ? "true" : "false", h264_frames, h264_bytes,
                keyframe_seen ? "true" : "false", h265_frames,
                disconnected ? "true" : "false");
+    } else if (channel_probe) {
+        printf("{\"connected\":%s,\"connect_state\":%d,\"login_sent\":%s,"
+               "\"login_response_received\":%s,\"authenticated\":%s,"
+               "\"login_result\":%d",
+               connected ? "true" : "false", state, login_sent ? "true" : "false",
+               login_response_received ? "true" : "false",
+               authenticated ? "true" : "false", login_result);
+        if (authenticated) print_channel_probe(probe_results);
+        printf(",\"disconnected\":%s}\n", disconnected ? "true" : "false");
     } else if (authenticate && login_response_received) {
         printf("{\"connected\":%s,\"connect_state\":%d,\"login_sent\":%s,"
                "\"login_response_received\":true,\"authenticated\":%s,"
