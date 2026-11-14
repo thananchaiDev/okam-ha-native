@@ -337,7 +337,9 @@ static bool forward_video_frames(client_read_fn client_read, void *client,
 #define PROBE_READ_TIMEOUT_MS 20
 #define PROBE_BUFFER_BYTES (64U * 1024U)
 
-static const int probe_substreams[] = {2, 1, 0, 4};
+/* Values the official app sends: VideoResolution index (high=1, general=2,
+ * unknown=3, low=4), 100 for superHD; 0, 5 and 6 cover the remaining enum. */
+static const int probe_substreams[] = {2, 1, 0, 4, 3, 100, 5, 6};
 #define PROBE_SUBSTREAM_COUNT (sizeof(probe_substreams) / sizeof(probe_substreams[0]))
 
 typedef struct {
