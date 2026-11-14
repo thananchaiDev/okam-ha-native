@@ -61,6 +61,7 @@ ARG FFMPEG_VERSION=8.1.2
 ARG FFMPEG_SHA256=9fd092511605bbebafe095ea6d38d9e40f34d12f7386e1258372df8be0576eb7
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl gcc libc6-dev make nasm \
+      pkg-config libx264-dev \
     && rm -rf /var/lib/apt/lists/*
 RUN curl -fsSL "https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n${FFMPEG_VERSION}.tar.gz" -o /tmp/ffmpeg.tar.gz \
     && echo "${FFMPEG_SHA256}  /tmp/ffmpeg.tar.gz" | sha256sum -c - \
@@ -77,12 +78,18 @@ RUN curl -fsSL "https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n${FFMPEG_VER
       --disable-shared \
       --enable-static \
       --enable-small \
+      --enable-gpl \
+      --enable-libx264 \
       --enable-ffmpeg \
       --enable-protocol=pipe \
       --enable-demuxer=h264 \
       --enable-parser=h264 \
       --enable-decoder=h264 \
+      --enable-demuxer=hevc \
+      --enable-parser=hevc \
+      --enable-decoder=hevc \
       --enable-encoder=mjpeg \
+      --enable-encoder=libx264 \
       --enable-muxer=image2pipe \
       --enable-muxer=mpegts \
       --enable-filter=scale \
@@ -94,7 +101,7 @@ RUN cd "/tmp/FFmpeg-n${FFMPEG_VERSION}" \
     && cp ffmpeg /out/ffmpeg/bin/ffmpeg
 
 FROM python:3.12-slim-bookworm AS runtime-base
-ARG BUILD_VERSION=1.3.2
+ARG BUILD_VERSION=1.3.3
 ARG BUILD_ARCH
 LABEL io.hass.version=$BUILD_VERSION \
       io.hass.arch=$BUILD_ARCH \
@@ -102,7 +109,7 @@ LABEL io.hass.version=$BUILD_VERSION \
       io.hass.name="O-KAM Native Bridge"
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates libstdc++6 \
+    && apt-get install -y --no-install-recommends ca-certificates libstdc++6 libx264-164 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ffmpeg-build /out/ffmpeg/bin/ffmpeg /usr/bin/ffmpeg

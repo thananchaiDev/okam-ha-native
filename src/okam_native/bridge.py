@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import hmac
 import json
 import re
-import secrets
 import subprocess
 import sys
 import threading
@@ -53,6 +54,34 @@ class QuietThreadingHTTPServer(ThreadingHTTPServer):
         )
 
 
+def stream_token(api_token: str, camera_id: str) -> str:
+    """A stable per-camera media token that does not reveal the API token."""
+
+    digest = hmac.new(
+        api_token.encode("utf-8"),
+        b"okam-native-stream:" + camera_id.encode("utf-8"),
+        hashlib.sha256,
+    ).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+
+
+# Browsers and Home Assistant's WebRTC path cannot play H.265, so H.265 cameras
+# are re-encoded to H.264. Capped at 1280 px wide to bound the CPU cost.
+HEVC_TO_H264 = (
+    "-vf", "scale=w='min(1280,iw)':h=-2",
+    "-c:v", "libx264",
+    "-preset", "ultrafast",
+    "-tune", "zerolatency",
+    "-pix_fmt", "yuv420p",
+    "-g", "40",
+)
+PASSTHROUGH = ("-c:v", "copy")
+
+
+def mux_video_arguments(codec: str) -> tuple[str, ...]:
+    return HEVC_TO_H264 if codec == "hevc" else PASSTHROUGH
+
+
 class CameraBridge:
     """One camera exposed through a reference-counted native stream session."""
 
@@ -68,7 +97,11 @@ class CameraBridge:
         self.camera_id = camera_id
         self.camera_name = camera_name
         self._api_token = api_token
-        self._stream_token = secrets.token_urlsafe(32)
+        # Derived rather than random so it survives an app restart: Home
+        # Assistant caches the stream URL, and a new random token after every
+        # restart or update made every camera answer 401 until the
+        # integration was reloaded.
+        self._stream_token = stream_token(api_token, camera_id)
         self.session = session
         self.ffmpeg = ffmpeg
 
@@ -341,7 +374,7 @@ def make_handler(
                         "-use_wallclock_as_timestamps", "1",
                         "-f", codec,
                         "-i", "pipe:0",
-                        "-c:v", "copy",
+                        *mux_video_arguments(codec),
                         "-f", "mpegts",
                         "-muxdelay", "0",
                         "-muxpreload", "0",

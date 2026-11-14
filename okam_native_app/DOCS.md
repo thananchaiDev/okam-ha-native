@@ -66,8 +66,8 @@ stream_ended camera=front3 returncode=0 media_ready=true error=none connected=tr
 ```
 
 `login_result=-1` means the camera refused its password. `h265_frames` above
-zero means the camera sends H.265; it is forwarded, but some browsers cannot
-play H.265 live view. `error=no_media_timeout` means no video arrived within 60
+zero means the camera sends H.265; it is re-encoded to H.264 for playback,
+which costs CPU while the camera is being viewed. `error=no_media_timeout` means no video arrived within 60
 seconds and the session was stopped. `stream_end_reason` says why video
 stopped: `1` nothing arrived on the video channel, `2` an unrecognised frame
 header (`last_magic` and `last_frame_type` describe it), `3` an invalid frame
