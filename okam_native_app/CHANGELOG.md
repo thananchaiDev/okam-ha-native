@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.1
+
+- Adds an optional `password` to each `cameras` entry, for cameras on the same
+  account that use different local passwords. It overrides `camera_password`
+  for that camera only.
+- Logs one `stream_ended` line per live session with the camera alias and the
+  sanitized login and frame counters (including H.265 frames the bridge does
+  not forward yet), so a failing camera can be diagnosed without the startup
+  diagnostics.
+- Stops a camera session that delivers no H.264 within 60 seconds. Viewers of
+  such a camera were never released and kept the camera connected.
+- Startup diagnostics now test every camera and report each by alias instead
+  of stopping the app at the first camera that fails.
+
 ## 1.3.0
 
 - Exposes every camera in the O-KAM account from one app instead of requiring
