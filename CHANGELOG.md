@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.6
+
+- The `probe_camera` diagnostic also tries the multi-channel live start the
+  official app uses for NVR-style devices, `{"live_start":{"chns":N,
+  "streammask":M}}` through `client_write_cgi_nvr`, and logs the result as
+  `nvr_chns=... streammask=...` lines.
+
 ## 1.3.5
 
 - The `probe_camera` diagnostic also tries substreams 3, 100, 5 and 6. The

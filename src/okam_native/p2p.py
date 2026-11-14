@@ -394,7 +394,7 @@ def run_channel_probe(
     device_password: str,
     *,
     environment: dict[str, str],
-    timeout: float = 150.0,
+    timeout: float = 240.0,
 ) -> dict[str, object]:
     """Ask the helper which P2P channels carry data for each live substream."""
 
@@ -431,14 +431,21 @@ def channel_probe_lines(alias: str, payload: dict[str, object]) -> list[str]:
         f"login_result={number(payload.get('login_result'))}"
     ]
     probes = payload.get("probes")
-    for probe in probes if isinstance(probes, list) else []:
+    nvr_probes = payload.get("nvr_probes")
+    tagged = [("substream", probe) for probe in (probes if isinstance(probes, list) else [])]
+    tagged += [("nvr", probe) for probe in (nvr_probes if isinstance(nvr_probes, list) else [])]
+    for kind, probe in tagged:
         if not isinstance(probe, dict):
             continue
-        parts = [
-            f"channel_probe camera={alias}",
-            f"substream={number(probe.get('substream'))}",
-            f"start_sent={flag(probe.get('start_sent'))}",
-        ]
+        parts = [f"channel_probe camera={alias}"]
+        if kind == "nvr":
+            parts.append(
+                f"nvr_chns={number(probe.get('chns'))} "
+                f"streammask={number(probe.get('streammask'))}"
+            )
+        else:
+            parts.append(f"substream={number(probe.get('substream'))}")
+        parts.append(f"start_sent={flag(probe.get('start_sent'))}")
         channels = probe.get("channels")
         found = [c for c in channels if isinstance(c, dict)] if isinstance(channels, list) else []
         if not found:

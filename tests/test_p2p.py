@@ -358,3 +358,25 @@ def test_channel_probe_lines_tolerate_a_failed_login() -> None:
     assert lines == [
         "channel_probe camera=side connected=true authenticated=false login_result=-1"
     ]
+
+
+def test_channel_probe_lines_include_nvr_live_start_results() -> None:
+    from okam_native.p2p import channel_probe_lines
+
+    payload = {
+        "connected": True,
+        "authenticated": True,
+        "login_result": 0,
+        "probes": [],
+        "nvr_probes": [
+            {"chns": 7, "streammask": 0, "start_sent": True,
+             "channels": [{"channel": 2, "bytes": 4096, "magic": 0xA815AA55, "type": 0}]},
+            {"chns": 1, "streammask": 1, "start_sent": False, "channels": []},
+        ],
+    }
+    lines = channel_probe_lines("side", payload)
+    assert lines[1] == (
+        "channel_probe camera=side nvr_chns=7 streammask=0 start_sent=true "
+        "ch2=4096b/magic=a815aa55/type=0"
+    )
+    assert lines[2] == "channel_probe camera=side nvr_chns=1 streammask=1 start_sent=false channels=none"

@@ -342,6 +342,14 @@ static bool forward_video_frames(client_read_fn client_read, void *client,
 static const int probe_substreams[] = {2, 1, 0, 4, 3, 100, 5, 6};
 #define PROBE_SUBSTREAM_COUNT (sizeof(probe_substreams) / sizeof(probe_substreams[0]))
 
+/* Multi-channel devices (NVRs and, it appears, multi-lens cameras) are
+ * started with a JSON command through client_write_cgi_nvr instead of
+ * livestream.cgi: {"live_start":{"chns":<channel bitmask>,"streammask":<n>}}.
+ * Taken from the official app's startNvrStream. */
+static const int probe_nvr_chns[] = {1, 1, 7, 7, 15};
+static const int probe_nvr_masks[] = {0, 1, 0, 1, 0};
+#define PROBE_NVR_COUNT (sizeof(probe_nvr_chns) / sizeof(probe_nvr_chns[0]))
+
 typedef struct {
     unsigned long long bytes[PROBE_CHANNELS];
     uint32_t first_magic[PROBE_CHANNELS];
@@ -391,6 +399,49 @@ static void probe_live_channels(client_read_fn client_read, client_write_cgi_fn 
         drain_channels(client_read, client, buffer, 1, NULL);
     }
     free(buffer);
+}
+
+static void probe_nvr_live_channels(client_read_fn client_read,
+                                    client_write_cgi_fn client_write_cgi_nvr, void *client,
+                                    channel_probe_result *results) {
+    unsigned char *buffer = malloc(PROBE_BUFFER_BYTES);
+    if (buffer == NULL) return;
+    for (size_t index = 0; index < PROBE_NVR_COUNT; ++index) {
+        char command[96];
+        snprintf(command, sizeof(command),
+                 "{\"live_start\":{\"chns\":%d,\"streammask\":%d}}",
+                 probe_nvr_chns[index], probe_nvr_masks[index]);
+        results[index].start_sent = client_write_cgi_nvr(client, command, 5000);
+        if (results[index].start_sent) {
+            drain_channels(client_read, client, buffer, PROBE_SECONDS, &results[index]);
+        }
+        client_write_cgi_nvr(client, "{\"live_stop\":{}}", 5000);
+        drain_channels(client_read, client, buffer, 1, NULL);
+    }
+    free(buffer);
+}
+
+static void print_probe_channels(const channel_probe_result *result) {
+    bool first = true;
+    for (int channel = 1; channel < PROBE_CHANNELS; ++channel) {
+        if (result->bytes[channel] == 0) continue;
+        printf("%s{\"channel\":%d,\"bytes\":%llu,\"magic\":%u,\"type\":%u}",
+               first ? "" : ",", channel, result->bytes[channel],
+               (unsigned int)result->first_magic[channel], result->first_type[channel]);
+        first = false;
+    }
+}
+
+static void print_nvr_probe(const channel_probe_result *results, bool available) {
+    printf(",\"nvr_probes\":[");
+    for (size_t index = 0; available && index < PROBE_NVR_COUNT; ++index) {
+        printf("%s{\"chns\":%d,\"streammask\":%d,\"start_sent\":%s,\"channels\":[",
+               index ? "," : "", probe_nvr_chns[index], probe_nvr_masks[index],
+               results[index].start_sent ? "true" : "false");
+        print_probe_channels(&results[index]);
+        printf("]}");
+    }
+    printf("]");
 }
 
 static void print_channel_probe(const channel_probe_result *results) {
@@ -512,6 +563,10 @@ int main(int argc, char **argv) {
     unsigned int last_frame_type = 0;
     channel_probe_result probe_results[PROBE_SUBSTREAM_COUNT];
     memset(probe_results, 0, sizeof(probe_results));
+    channel_probe_result nvr_results[PROBE_NVR_COUNT];
+    memset(nvr_results, 0, sizeof(nvr_results));
+    client_write_cgi_fn client_write_cgi_nvr =
+        (client_write_cgi_fn)android_dlsym(library, "client_write_cgi_nvr");
     if (client != NULL) {
         state = client_connect(client, CONNECT_TYPE_NORMAL, service_parameter, 0);
         connected = state == CONNECT_STATE_ONLINE;
@@ -525,6 +580,9 @@ int main(int argc, char **argv) {
         }
         if (connected && authenticated && channel_probe) {
             probe_live_channels(client_read, client_write_cgi, client, probe_results);
+            if (client_write_cgi_nvr != NULL) {
+                probe_nvr_live_channels(client_read, client_write_cgi_nvr, client, nvr_results);
+            }
         }
         if (connected && authenticated && live_mode) {
             stream_start_sent = client_write_cgi(
@@ -595,7 +653,10 @@ int main(int argc, char **argv) {
                connected ? "true" : "false", state, login_sent ? "true" : "false",
                login_response_received ? "true" : "false",
                authenticated ? "true" : "false", login_result);
-        if (authenticated) print_channel_probe(probe_results);
+        if (authenticated) {
+            print_channel_probe(probe_results);
+            print_nvr_probe(nvr_results, client_write_cgi_nvr != NULL);
+        }
         printf(",\"disconnected\":%s}\n", disconnected ? "true" : "false");
     } else if (authenticate && login_response_received) {
         printf("{\"connected\":%s,\"connect_state\":%d,\"login_sent\":%s,"
