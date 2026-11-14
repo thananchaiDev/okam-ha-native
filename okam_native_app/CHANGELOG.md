@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.0
+
+- Exposes every camera in the O-KAM account from one app instead of requiring
+  an account with exactly one camera.
+- Adds the optional `cameras` list to choose cameras by name and give each a
+  stable alias.
+- Lets the integration be added once per camera on the same bridge.
+
 ## 1.2.1
 
 - Shows the release notes in the app update dialog. The supervisor reads a

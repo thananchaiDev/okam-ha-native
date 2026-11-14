@@ -1,3 +1,8 @@
+> **Fork note:** this is a fork of
+> [oleandor/okam-ha-native](https://github.com/oleandor/okam-ha-native) that
+> adds support for several cameras in one app (option `cameras`). Install the
+> app and the integration from `https://github.com/thananchaiDev/okam-ha-native`.
+
 # O-KAM Native Bridge for Home Assistant
 
 O-KAM Native Bridge connects an O-KAM Pro camera directly to Home Assistant on
