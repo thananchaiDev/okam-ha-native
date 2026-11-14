@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.2
+
+- Streams cameras that encode H.265. The native helper now forwards H.265
+  frames instead of dropping them, and the bridge detects the codec from the
+  stream and muxes it accordingly. Live view and snapshots work for these
+  cameras; whether H.265 live view plays depends on the browser or app.
+- The `stream_ended` log line adds `stream_end_reason`, `last_magic` and
+  `last_frame_type`, which say why a camera's video stopped.
+
 ## 1.3.1
 
 - Adds an optional `password` to each `cameras` entry, for cameras on the same
