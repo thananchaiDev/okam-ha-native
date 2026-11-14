@@ -6,13 +6,13 @@ ROOT = Path(__file__).parents[1]
 
 def test_native_bridge_is_a_prebuilt_64_bit_ha_app() -> None:
     config = (ROOT / "okam_native_app" / "config.yaml").read_text(encoding="utf-8")
-    assert "image: ghcr.io/oleandor/okam-ha-native" in config
+    assert "image: ghcr.io/thananchaidev/okam-ha-native" in config
     assert "- aarch64" in config
     assert "- amd64" in config
     assert "boot: auto" in config
     assert "stage: experimental" not in config
     assert "machine:" not in config
-    assert "version: 1.2.1" in config
+    assert "version: 1.3.0" in config
     assert "idle_timeout_seconds: 120" in config
     assert "account_username: email" in config
     assert "account_password: password" in config
@@ -75,7 +75,7 @@ def test_repository_contains_camera_integration_for_native_api() -> None:
     manifest = (component / "manifest.json").read_text(encoding="utf-8")
     config_flow = (component / "config_flow.py").read_text(encoding="utf-8")
     camera = (component / "camera.py").read_text(encoding="utf-8")
-    assert '"version": "1.2.1"' in manifest
+    assert '"version": "1.3.0"' in manifest
     assert "http://homeassistant.local:8099" in config_flow
     assert "CameraEntityFeature.STREAM" in camera
     assert "_attr_has_entity_name = False" in camera
@@ -115,7 +115,7 @@ def test_user_documentation_is_current_and_complete() -> None:
     assert "wine" not in lowered
     assert "box64" not in lowered
     assert "xvfb" not in lowered
-    assert "https://github.com/oleandor/okam-ha-native" in combined
+    assert "https://github.com/thananchaiDev/okam-ha-native" in combined
     assert "custom_components/okam" in combined
     assert "camera.cabin" in combined
     assert "secondary" not in lowered
