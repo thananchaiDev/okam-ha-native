@@ -111,9 +111,8 @@ def _optional_user_id(
 
     Field 4 is the numeric account user id ("-" when unknown but a later field
     is needed); field 5 is the account's virtual id (VUID), sent only when the
-    transport id was resolved from it ("-" when absent but field 6 is sent);
-    field 6 is the account login token for eye4_authentication.cgi, sent only
-    together with a user id.
+    transport id was resolved from it; field 6 is the account login token for
+    eye4_authentication.cgi, sent only together with a user id and a VUID.
     """
 
     user_id = (
@@ -122,13 +121,15 @@ def _optional_user_id(
         else ""
     )
     vuid = virtual_uid if virtual_uid and 4 <= len(virtual_uid) <= 256 else ""
+    # Only VUID cameras get the token: ordinary cameras reject it and some
+    # then refuse to stream.
     token = (
         account_token
-        if user_id and _valid_account_token(account_token)
+        if user_id and vuid and _valid_account_token(account_token)
         else ""
     )
     if token:
-        return _field(user_id) + _field(vuid or "-") + _field(token)
+        return _field(user_id) + _field(vuid) + _field(token)
     if vuid:
         return _field(user_id or "-") + _field(vuid)
     return _field(user_id) if user_id else b""
