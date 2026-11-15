@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.10
+
+- Registers a camera's virtual device id (VUID) on the P2P client with
+  `client_setvuid` right after creating it, as the official app does, when the
+  account lists the camera under a virtual id. VUID cameras accepted commands
+  but sent no video without it.
+
 ## 1.3.9
 
 - Sends the O-KAM account's user id as `userId` with camera commands, and the
