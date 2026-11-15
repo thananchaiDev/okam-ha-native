@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.16
+
+- Revert the extra post-live queries for VUID cameras added in 1.3.11; they did not bring video and are removed to restore the 1.3.10 command sequence.
+
 ## 1.3.15
 
 - Stop sending eye4_authentication entirely: cameras reject the account-service token the bridge has, and VUID cameras that streamed before stopped after receiving it. The helper support stays for when the right token is known.
