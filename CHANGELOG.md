@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.13
+
+- Diagnostics: `eye4_auth` now distinguishes a failed send (-2), no reply (-3) and a rejected command (-4); the account log line reports whether a login token is available (`account_token=valid|invalid|absent`, never the token).
+
 ## 1.3.12
 
 - Authenticate each camera session with the O-KAM account (eye4_authentication) right after login, like the official PC client. Multi-sensor cameras send video only to authenticated sessions.

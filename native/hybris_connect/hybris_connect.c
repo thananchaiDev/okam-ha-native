@@ -585,16 +585,18 @@ static void note_command_response(channel_probe_result *result,
 }
 
 /* Send eye4_authentication.cgi and wait briefly for its `eye4_auth=` reply.
- * Returns -1 when not sent (no token), 0 when sent without a positive reply,
- * and 1 when the camera answered eye4_auth=1. Other command replies that
- * arrive meanwhile are discarded. */
+ * Returns -1 when not sent (no token), -2 when the send failed, -3 when no
+ * reply arrived, -4 when a reply arrived without eye4_auth (a rejected
+ * command), otherwise the eye4_auth value (1 = accepted). Other command
+ * replies that arrive meanwhile are discarded. */
 static int eye4_authenticate(client_read_fn client_read, client_write_cgi_fn client_write_cgi,
                              void *client) {
     if (eye4_auth_command[0] == 0) return -1;
     bool sent = send_cgi(client_write_cgi, client, eye4_auth_command);
     memset(eye4_auth_command, 0, sizeof(eye4_auth_command));
-    if (!sent) return 0;
+    if (!sent) return -2;
     static unsigned char payload[MAX_COMMAND_BYTES + 1];
+    int outcome = -3;
     time_t deadline = time(NULL) + 4;
     while (time(NULL) <= deadline) {
         unsigned int command = 0;
@@ -602,9 +604,11 @@ static int eye4_authenticate(client_read_fn client_read, client_write_cgi_fn cli
         if (!read_command_frame(client_read, client, payload, sizeof(payload),
                                 &command, &length)) continue;
         const char *found = strstr((const char *)payload, "eye4_auth=");
-        if (found != NULL) return found[10] == '1' ? 1 : 0;
+        if (found != NULL) return found[10] >= '0' && found[10] <= '9' ? found[10] - '0' : -4;
+        if (strstr((const char *)payload, "result=") != NULL &&
+            strstr((const char *)payload, "var ") == NULL) outcome = -4;
     }
-    return 0;
+    return outcome;
 }
 
 static void probe_status(client_read_fn client_read, client_write_cgi_fn client_write_cgi,
