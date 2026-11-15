@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.7
+
+- The `probe_camera` diagnostic now reads the camera's `get_status.cgi`
+  multi-sensor capability flags (only an allow-listed set of integer flags)
+  and, for every live-start attempt, how many command responses came back
+  and the last command id and `result` code.
+
 ## 1.3.6
 
 - The `probe_camera` diagnostic also tries the multi-channel live start the

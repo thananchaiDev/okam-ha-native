@@ -136,6 +136,39 @@ static uint32_t read_le32(const unsigned char *buffer) {
            ((uint32_t)buffer[2] << 16) | ((uint32_t)buffer[3] << 24);
 }
 
+/* Integer value of `key=` in a CGI response, matched only at a key boundary. */
+static bool parse_int_key(const unsigned char *payload, size_t size, const char *key,
+                          int *value_out) {
+    size_t key_size = strlen(key);
+    for (size_t i = 0; i + key_size < size; ++i) {
+        if (memcmp(payload + i, key, key_size) != 0) continue;
+        if (i > 0) {
+            unsigned char before = payload[i - 1];
+            if ((before >= 'a' && before <= 'z') || (before >= 'A' && before <= 'Z') ||
+                (before >= '0' && before <= '9') || before == '_') continue;
+        }
+        size_t cursor = i + key_size;
+        while (cursor < size && (payload[cursor] == ' ' || payload[cursor] == '\t')) cursor++;
+        if (cursor >= size || payload[cursor++] != '=') continue;
+        while (cursor < size && (payload[cursor] == ' ' || payload[cursor] == '\"' ||
+                                 payload[cursor] == '\'')) cursor++;
+        int sign = 1;
+        if (cursor < size && payload[cursor] == '-') {
+            sign = -1;
+            cursor++;
+        }
+        if (cursor >= size || payload[cursor] < '0' || payload[cursor] > '9') continue;
+        int value = 0;
+        while (cursor < size && payload[cursor] >= '0' && payload[cursor] <= '9') {
+            if (value > 100000) return false;
+            value = value * 10 + payload[cursor++] - '0';
+        }
+        *value_out = sign * value;
+        return true;
+    }
+    return false;
+}
+
 static bool is_login_response(uint16_t command) {
     return command == LOGIN_RESPONSE;
 }
@@ -355,7 +388,91 @@ typedef struct {
     uint32_t first_magic[PROBE_CHANNELS];
     unsigned int first_type[PROBE_CHANNELS];
     bool start_sent;
+    unsigned int responses;
+    unsigned int last_command;
+    int last_result;
+    bool last_result_seen;
 } channel_probe_result;
+
+/* Capability flags the official app reads from get_status.cgi to choose how a
+ * multi-sensor camera is played. Only these integer flags are reported. */
+static const char *const probe_status_keys[] = {
+    "support_mutil_sensor_stream", "dev_sensor_num", "support_binocular_mutil",
+    "splitScreen", "support_dual_sensor_stitch", "support_three_sensor_binocular",
+    "sensornum", "binocular_num", "support_binocular", "support_fix_sensor",
+    "pininpic_sensor",
+};
+#define PROBE_STATUS_KEY_COUNT (sizeof(probe_status_keys) / sizeof(probe_status_keys[0]))
+
+typedef struct {
+    bool requested;
+    unsigned int responses;
+    bool seen[PROBE_STATUS_KEY_COUNT];
+    int values[PROBE_STATUS_KEY_COUNT];
+} status_probe_result;
+
+/* Read one command-channel frame if one is waiting. Returns false when no
+ * frame header arrived within a short poll. */
+static bool read_command_frame(client_read_fn client_read, void *client,
+                               unsigned char *payload, size_t capacity,
+                               unsigned int *command, size_t *length) {
+    unsigned char header[8];
+    int received = 0;
+    client_read(client, COMMAND_CHANNEL, header, (int)sizeof(header),
+                PROBE_READ_TIMEOUT_MS, &received);
+    if (received <= 0 || (size_t)received > sizeof(header)) return false;
+    time_t deadline = time(NULL) + 2;
+    if ((size_t)received < sizeof(header) &&
+        !read_client_exact(client_read, client, COMMAND_CHANNEL, header + received,
+                           sizeof(header) - (size_t)received, deadline)) return false;
+    uint16_t magic = read_le16(header);
+    uint16_t frame_length = read_le16(header + 4);
+    if (magic != 0x0a01U || frame_length >= capacity) return false;
+    if (frame_length > 0 &&
+        !read_client_exact(client_read, client, COMMAND_CHANNEL, payload, frame_length,
+                           deadline)) return false;
+    payload[frame_length] = 0;
+    *command = read_le16(header + 2);
+    *length = frame_length;
+    return true;
+}
+
+static void note_command_response(channel_probe_result *result,
+                                  const unsigned char *payload, size_t length,
+                                  unsigned int command) {
+    if (result == NULL) return;
+    result->responses++;
+    result->last_command = command;
+    int code = 0;
+    if (parse_int_key(payload, length, "result", &code)) {
+        result->last_result = code;
+        result->last_result_seen = true;
+    }
+}
+
+static void probe_status(client_read_fn client_read, client_write_cgi_fn client_write_cgi,
+                         void *client, status_probe_result *status) {
+    unsigned char *payload = malloc(MAX_COMMAND_BYTES);
+    if (payload == NULL) return;
+    status->requested = client_write_cgi(client, "get_status.cgi?", 5000);
+    time_t deadline = time(NULL) + PROBE_SECONDS;
+    while (status->requested && time(NULL) < deadline) {
+        unsigned int command = 0;
+        size_t length = 0;
+        if (!read_command_frame(client_read, client, payload, MAX_COMMAND_BYTES,
+                                &command, &length)) continue;
+        status->responses++;
+        for (size_t key = 0; key < PROBE_STATUS_KEY_COUNT; ++key) {
+            int value = 0;
+            if (parse_int_key(payload, length, probe_status_keys[key], &value)) {
+                status->seen[key] = true;
+                status->values[key] = value;
+            }
+        }
+        memset(payload, 0, length);
+    }
+    free(payload);
+}
 
 /* Drain every channel for a while, counting bytes and remembering only the
  * first frame header word and type byte per channel. No payload is kept. */
@@ -364,6 +481,13 @@ static void drain_channels(client_read_fn client_read, void *client,
                            channel_probe_result *result) {
     time_t deadline = time(NULL) + seconds;
     while (time(NULL) < deadline) {
+        unsigned int command = 0;
+        size_t length = 0;
+        if (read_command_frame(client_read, client, buffer, PROBE_BUFFER_BYTES,
+                               &command, &length)) {
+            note_command_response(result, buffer, length, command);
+            memset(buffer, 0, length);
+        }
         for (int channel = 1; channel < PROBE_CHANNELS; ++channel) {
             int received = 0;
             client_read(client, channel, buffer, (int)PROBE_BUFFER_BYTES,
@@ -421,6 +545,13 @@ static void probe_nvr_live_channels(client_read_fn client_read,
     free(buffer);
 }
 
+static void print_probe_responses(const channel_probe_result *result) {
+    printf(",\"responses\":%u,\"last_command\":%u,\"last_result\":",
+           result->responses, result->last_command);
+    if (result->last_result_seen) printf("%d", result->last_result);
+    else printf("null");
+}
+
 static void print_probe_channels(const channel_probe_result *result) {
     bool first = true;
     for (int channel = 1; channel < PROBE_CHANNELS; ++channel) {
@@ -435,33 +566,42 @@ static void print_probe_channels(const channel_probe_result *result) {
 static void print_nvr_probe(const channel_probe_result *results, bool available) {
     printf(",\"nvr_probes\":[");
     for (size_t index = 0; available && index < PROBE_NVR_COUNT; ++index) {
-        printf("%s{\"chns\":%d,\"streammask\":%d,\"start_sent\":%s,\"channels\":[",
+        printf("%s{\"chns\":%d,\"streammask\":%d,\"start_sent\":%s",
                index ? "," : "", probe_nvr_chns[index], probe_nvr_masks[index],
                results[index].start_sent ? "true" : "false");
+        print_probe_responses(&results[index]);
+        printf(",\"channels\":[");
         print_probe_channels(&results[index]);
         printf("]}");
     }
     printf("]");
 }
 
+
 static void print_channel_probe(const channel_probe_result *results) {
     printf(",\"probes\":[");
     for (size_t index = 0; index < PROBE_SUBSTREAM_COUNT; ++index) {
-        printf("%s{\"substream\":%d,\"start_sent\":%s,\"channels\":[",
+        printf("%s{\"substream\":%d,\"start_sent\":%s",
                index ? "," : "", probe_substreams[index],
                results[index].start_sent ? "true" : "false");
-        bool first = true;
-        for (int channel = 1; channel < PROBE_CHANNELS; ++channel) {
-            if (results[index].bytes[channel] == 0) continue;
-            printf("%s{\"channel\":%d,\"bytes\":%llu,\"magic\":%u,\"type\":%u}",
-                   first ? "" : ",", channel, results[index].bytes[channel],
-                   (unsigned int)results[index].first_magic[channel],
-                   results[index].first_type[channel]);
-            first = false;
-        }
+        print_probe_responses(&results[index]);
+        printf(",\"channels\":[");
+        print_probe_channels(&results[index]);
         printf("]}");
     }
     printf("]");
+}
+
+static void print_status_probe(const status_probe_result *status) {
+    printf(",\"status\":{\"requested\":%s,\"responses\":%u,\"flags\":{",
+           status->requested ? "true" : "false", status->responses);
+    bool first = true;
+    for (size_t key = 0; key < PROBE_STATUS_KEY_COUNT; ++key) {
+        if (!status->seen[key]) continue;
+        printf("%s\"%s\":%d", first ? "" : ",", probe_status_keys[key], status->values[key]);
+        first = false;
+    }
+    printf("}}");
 }
 
 int main(int argc, char **argv) {
@@ -565,6 +705,8 @@ int main(int argc, char **argv) {
     memset(probe_results, 0, sizeof(probe_results));
     channel_probe_result nvr_results[PROBE_NVR_COUNT];
     memset(nvr_results, 0, sizeof(nvr_results));
+    status_probe_result status_result;
+    memset(&status_result, 0, sizeof(status_result));
     client_write_cgi_fn client_write_cgi_nvr =
         (client_write_cgi_fn)android_dlsym(library, "client_write_cgi_nvr");
     if (client != NULL) {
@@ -579,6 +721,7 @@ int main(int argc, char **argv) {
             }
         }
         if (connected && authenticated && channel_probe) {
+            probe_status(client_read, client_write_cgi, client, &status_result);
             probe_live_channels(client_read, client_write_cgi, client, probe_results);
             if (client_write_cgi_nvr != NULL) {
                 probe_nvr_live_channels(client_read, client_write_cgi_nvr, client, nvr_results);
@@ -654,6 +797,7 @@ int main(int argc, char **argv) {
                login_response_received ? "true" : "false",
                authenticated ? "true" : "false", login_result);
         if (authenticated) {
+            print_status_probe(&status_result);
             print_channel_probe(probe_results);
             print_nvr_probe(nvr_results, client_write_cgi_nvr != NULL);
         }
