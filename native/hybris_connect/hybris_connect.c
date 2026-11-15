@@ -305,6 +305,29 @@ static bool write_stdout(const unsigned char *payload, size_t size) {
 #define PRE_LIVE_COMMAND "trans_cmd_string.cgi?cmd=8000&command=0&"
 /* Keep-alive the PC client sends to every camera every few seconds. */
 #define ACTIVE_TIME_COMMAND "trans_cmd_string.cgi?cmd=2131&command=1&DevActiveTime=10&"
+/* Sent by the PC client right after livestream.cgi on VUID cameras, before the
+ * first video frame arrives: camera parameters, a status query naming the
+ * VUID, and a light/siren state query. */
+#define VUID_PARAMS_COMMAND "get_camera_params.cgi?"
+#define VUID_LIGHT_COMMAND "trans_cmd_string.cgi?cmd=2109&command=2&"
+
+/* `get_status.cgi?vuid=<vuid>&`, or empty when the camera has no VUID. */
+static char vuid_status_command[80];
+
+static void set_vuid_status_command(const char *virtual_uid) {
+    vuid_status_command[0] = 0;
+    if (virtual_uid == NULL) return;
+    size_t size = strlen(virtual_uid);
+    if (size == 0 || size > 32) return;
+    for (size_t i = 0; i < size; ++i) {
+        char c = virtual_uid[i];
+        bool ok = (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') ||
+                  (c >= 'a' && c <= 'z') || c == '-';
+        if (!ok) return;
+    }
+    snprintf(vuid_status_command, sizeof(vuid_status_command),
+             "get_status.cgi?vuid=%s&", virtual_uid);
+}
 
 /* `userId=<account id>&`, appended to every command like the official PC
  * client does. Empty when no account id was supplied. */
@@ -788,6 +811,7 @@ int main(int argc, char **argv) {
             (client_setvuid_fn)android_dlsym(library, "client_setvuid");
         if (client_setvuid != NULL) client_setvuid(client, virtual_uid);
     }
+    set_vuid_status_command(virtual_uid);
     if (virtual_uid != NULL) {
         memset(virtual_uid, 0, strlen(virtual_uid));
         free(virtual_uid);
@@ -842,6 +866,11 @@ int main(int argc, char **argv) {
             send_cgi(client_write_cgi, client, PRE_LIVE_COMMAND);
             stream_start_sent = send_cgi(client_write_cgi, client,
                                          "livestream.cgi?streamid=10&substream=2&");
+            if (stream_start_sent && vuid_status_command[0] != 0) {
+                send_cgi(client_write_cgi, client, VUID_PARAMS_COMMAND);
+                send_cgi(client_write_cgi, client, vuid_status_command);
+                send_cgi(client_write_cgi, client, VUID_LIGHT_COMMAND);
+            }
             if (stream_start_sent) {
                 if (stream_stdout) {
                     signal(SIGPIPE, SIG_IGN);
@@ -863,6 +892,7 @@ int main(int argc, char **argv) {
         if (connected) disconnected = client_disconnect(client);
         client_destroy(client);
     }
+    memset(vuid_status_command, 0, sizeof(vuid_status_command));
     memset(service_parameter, 0, strlen(service_parameter));
     free(service_parameter);
     if (device_password != NULL) {
