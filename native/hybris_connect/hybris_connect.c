@@ -298,6 +298,62 @@ static bool write_stdout(const unsigned char *payload, size_t size) {
     return true;
 }
 
+/* Sent by the official O-KAM Pro PC client right before livestream.cgi. It is
+ * a board/capability query, and multi-sensor cameras send no video without
+ * it. Harmless for other cameras: its reply is ignored. */
+#define PRE_LIVE_COMMAND "trans_cmd_string.cgi?cmd=8000&command=0&"
+#define RAW_CHUNK_BYTES (64U * 1024U)
+
+static bool starts_with_annex_b(const unsigned char *data) {
+    return (data[0] == 0 && data[1] == 0 && data[2] == 0 && data[3] == 1) ||
+           (data[0] == 0 && data[1] == 0 && data[2] == 1);
+}
+
+/* Some cameras (seen on a multi-sensor model) send a bare Annex-B elementary
+ * stream on the video channel, without the 32-byte frame header. Forward it
+ * unchanged; the bridge identifies the codec itself. */
+static bool forward_raw_stream(client_read_fn client_read, void *client,
+                               const unsigned char *first, size_t first_size,
+                               unsigned int *frames, unsigned long long *bytes,
+                               unsigned int *end_reason) {
+    if (!write_stdout(first, first_size)) {
+        *end_reason = STREAM_END_OUTPUT_CLOSED;
+        return true;
+    }
+    *bytes += first_size;
+    (*frames)++;
+    unsigned char *chunk = malloc(RAW_CHUNK_BYTES);
+    if (chunk == NULL) {
+        *end_reason = STREAM_END_NO_MEMORY;
+        return true;
+    }
+    time_t deadline = time(NULL) + STREAM_TIMEOUT_SECONDS;
+    while (stream_running) {
+        int received = 0;
+        int result = client_read(client, VIDEO_CHANNEL, chunk, (int)RAW_CHUNK_BYTES,
+                                 READ_TIMEOUT_MS, &received);
+        if (received > 0 && (size_t)received <= RAW_CHUNK_BYTES) {
+            deadline = time(NULL) + STREAM_TIMEOUT_SECONDS;
+            *bytes += (unsigned long long)received;
+            if (received >= 4 && starts_with_annex_b(chunk)) (*frames)++;
+            bool ok = write_stdout(chunk, (size_t)received);
+            memset(chunk, 0, (size_t)received);
+            if (!ok) {
+                *end_reason = STREAM_END_OUTPUT_CLOSED;
+                stream_running = 0;
+                break;
+            }
+            continue;
+        }
+        if ((result != -3 && result < 0) || time(NULL) > deadline) {
+            *end_reason = STREAM_END_HEADER_READ;
+            break;
+        }
+    }
+    free(chunk);
+    return true;
+}
+
 static bool is_h265_frame(const unsigned char *header) {
     return header[4] == 0x10U || header[4] == 0x11U;
 }
@@ -323,6 +379,10 @@ static bool forward_video_frames(client_read_fn client_read, void *client,
         *last_magic = read_le32(header);
         *last_frame_type = header[4];
         if (*last_magic != 0xa815aa55U) {
+            if (*frames == 0 && *h265_frames == 0 && starts_with_annex_b(header)) {
+                return forward_raw_stream(client_read, client, header, sizeof(header),
+                                          frames, bytes, end_reason);
+            }
             *end_reason = STREAM_END_BAD_MAGIC;
             return false;
         }
@@ -511,6 +571,8 @@ static void probe_live_channels(client_read_fn client_read, client_write_cgi_fn 
                                 void *client, channel_probe_result *results) {
     unsigned char *buffer = malloc(PROBE_BUFFER_BYTES);
     if (buffer == NULL) return;
+    client_write_cgi(client, PRE_LIVE_COMMAND, 5000);
+    drain_channels(client_read, client, buffer, 1, NULL);
     for (size_t index = 0; index < PROBE_SUBSTREAM_COUNT; ++index) {
         char command[96];
         snprintf(command, sizeof(command), "livestream.cgi?streamid=10&substream=%d&",
@@ -728,6 +790,7 @@ int main(int argc, char **argv) {
             }
         }
         if (connected && authenticated && live_mode) {
+            client_write_cgi(client, PRE_LIVE_COMMAND, 5000);
             stream_start_sent = client_write_cgi(
                 client, "livestream.cgi?streamid=10&substream=2&", 5000);
             if (stream_start_sent) {
