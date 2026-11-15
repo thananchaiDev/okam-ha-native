@@ -302,6 +302,33 @@ static bool write_stdout(const unsigned char *payload, size_t size) {
  * a board/capability query, and multi-sensor cameras send no video without
  * it. Harmless for other cameras: its reply is ignored. */
 #define PRE_LIVE_COMMAND "trans_cmd_string.cgi?cmd=8000&command=0&"
+/* Keep-alive the PC client sends to every camera every few seconds. */
+#define ACTIVE_TIME_COMMAND "trans_cmd_string.cgi?cmd=2131&command=1&DevActiveTime=10&"
+
+/* `userId=<account id>&`, appended to every command like the official PC
+ * client does. Empty when no account id was supplied. */
+static char user_id_suffix[48];
+
+static void set_account_user_id(const char *user_id) {
+    user_id_suffix[0] = 0;
+    if (user_id == NULL) return;
+    size_t size = strlen(user_id);
+    if (size == 0 || size > 20) return;
+    for (size_t i = 0; i < size; ++i) {
+        if (user_id[i] < '0' || user_id[i] > '9') return;
+    }
+    snprintf(user_id_suffix, sizeof(user_id_suffix), "userId=%s&", user_id);
+}
+
+static bool send_cgi(client_write_cgi_fn write_cgi, void *client, const char *command) {
+    if (user_id_suffix[0] == 0) return write_cgi(client, command, 5000);
+    char full[256];
+    int written = snprintf(full, sizeof(full), "%s%s", command, user_id_suffix);
+    if (written < 0 || (size_t)written >= sizeof(full)) return write_cgi(client, command, 5000);
+    bool ok = write_cgi(client, full, 5000);
+    memset(full, 0, sizeof(full));
+    return ok;
+}
 #define RAW_CHUNK_BYTES (64U * 1024U)
 
 static bool starts_with_annex_b(const unsigned char *data) {
@@ -514,7 +541,7 @@ static void probe_status(client_read_fn client_read, client_write_cgi_fn client_
                          void *client, status_probe_result *status) {
     unsigned char *payload = malloc(MAX_COMMAND_BYTES);
     if (payload == NULL) return;
-    status->requested = client_write_cgi(client, "get_status.cgi?", 5000);
+    status->requested = send_cgi(client_write_cgi, client, "get_status.cgi?");
     time_t deadline = time(NULL) + PROBE_SECONDS;
     while (status->requested && time(NULL) < deadline) {
         unsigned int command = 0;
@@ -571,17 +598,18 @@ static void probe_live_channels(client_read_fn client_read, client_write_cgi_fn 
                                 void *client, channel_probe_result *results) {
     unsigned char *buffer = malloc(PROBE_BUFFER_BYTES);
     if (buffer == NULL) return;
-    client_write_cgi(client, PRE_LIVE_COMMAND, 5000);
+    send_cgi(client_write_cgi, client, ACTIVE_TIME_COMMAND);
+    send_cgi(client_write_cgi, client, PRE_LIVE_COMMAND);
     drain_channels(client_read, client, buffer, 1, NULL);
     for (size_t index = 0; index < PROBE_SUBSTREAM_COUNT; ++index) {
         char command[96];
         snprintf(command, sizeof(command), "livestream.cgi?streamid=10&substream=%d&",
                  probe_substreams[index]);
-        results[index].start_sent = client_write_cgi(client, command, 5000);
+        results[index].start_sent = send_cgi(client_write_cgi, client, command);
         if (results[index].start_sent) {
             drain_channels(client_read, client, buffer, PROBE_SECONDS, &results[index]);
         }
-        client_write_cgi(client, "livestream.cgi?streamid=16&substream=0&", 5000);
+        send_cgi(client_write_cgi, client, "livestream.cgi?streamid=16&substream=0&");
         drain_channels(client_read, client, buffer, 1, NULL);
     }
     free(buffer);
@@ -681,6 +709,10 @@ int main(int argc, char **argv) {
     char *uid = read_field();
     char *service_parameter = read_field();
     char *device_password = authenticate ? read_field() : NULL;
+    /* Optional fourth field: the account's numeric user id. */
+    char *account_user_id = authenticate && device_password != NULL ? read_field() : NULL;
+    set_account_user_id(account_user_id);
+    free(account_user_id);
     if (uid == NULL || service_parameter == NULL ||
         (authenticate && device_password == NULL) || !initialize_stack_guard()) {
         free(uid);
@@ -790,9 +822,10 @@ int main(int argc, char **argv) {
             }
         }
         if (connected && authenticated && live_mode) {
-            client_write_cgi(client, PRE_LIVE_COMMAND, 5000);
-            stream_start_sent = client_write_cgi(
-                client, "livestream.cgi?streamid=10&substream=2&", 5000);
+            send_cgi(client_write_cgi, client, ACTIVE_TIME_COMMAND);
+            send_cgi(client_write_cgi, client, PRE_LIVE_COMMAND);
+            stream_start_sent = send_cgi(client_write_cgi, client,
+                                         "livestream.cgi?streamid=10&substream=2&");
             if (stream_start_sent) {
                 if (stream_stdout) {
                     signal(SIGPIPE, SIG_IGN);

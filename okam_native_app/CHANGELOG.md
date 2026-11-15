@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.9
+
+- Sends the O-KAM account's user id as `userId` with camera commands, and the
+  `DevActiveTime` keep-alive before a live start, as the official PC client
+  does. Newer cameras bound to the account may stream only to commands that
+  carry it. The id never appears in logs or process arguments.
+
 ## 1.3.8
 
 - Supports multi-sensor cameras that sent no video. A trace of the official

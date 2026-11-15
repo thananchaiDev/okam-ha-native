@@ -58,3 +58,17 @@ def test_account_errors_never_include_credentials() -> None:
         Eye4AccountClient(opener=opener).enumerate("viewer@example.com", "secret")
     assert "viewer@example.com" not in str(caught.value)
     assert "secret" not in str(caught.value)
+
+
+def test_enumerated_devices_carry_the_account_user_id_privately() -> None:
+    def opener(request, timeout: float) -> bytes:
+        path = urlsplit(request.full_url).path
+        if path == "/user/summary":
+            return json.dumps({"userid": 123456789}).encode()
+        if path == "/login/token":
+            return json.dumps({"token": "opaque-token"}).encode()
+        return json.dumps([{"uid": "device-id", "nickname": "Side", "password": "x"}]).encode()
+
+    device = Eye4AccountClient(opener=opener).enumerate("viewer@example.com", "password")[0]
+    assert device.account_user_id == "123456789"
+    assert "123456789" not in repr(device)

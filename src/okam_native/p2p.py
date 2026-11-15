@@ -104,6 +104,14 @@ def resolve_client_id(uid: str, *, opener: OpenRequest = _open_request) -> str:
     return client_id
 
 
+def _optional_user_id(account_user_id: str) -> bytes:
+    """Fourth helper field: the account user id, sent only when it is numeric."""
+
+    if account_user_id and account_user_id.isdigit() and len(account_user_id) <= 20:
+        return _field(account_user_id)
+    return b""
+
+
 def _field(value: str) -> bytes:
     encoded = value.encode("utf-8")
     if not encoded or len(encoded) > MAX_FIELD_BYTES or any(byte < 0x20 for byte in encoded):
@@ -395,10 +403,12 @@ def run_channel_probe(
     *,
     environment: dict[str, str],
     timeout: float = 240.0,
+    account_user_id: str = "",
 ) -> dict[str, object]:
     """Ask the helper which P2P channels carry data for each live substream."""
 
     stdin = _field(uid) + _field(service_parameter) + _field(device_password)
+    stdin += _optional_user_id(account_user_id)
     try:
         completed = subprocess.run(
             [helper, library, "--channel-probe"],
@@ -705,10 +715,12 @@ def open_stream_process(
     device_password: str,
     *,
     environment: dict[str, str],
+    account_user_id: str = "",
 ) -> subprocess.Popen[bytes]:
     """Start the graceful raw-H.264 helper with all sensitive input on stdin."""
 
     stdin = _field(uid) + _field(service_parameter) + _field(device_password)
+    stdin += _optional_user_id(account_user_id)
     try:
         process = subprocess.Popen(
             [helper, library, "--stream-stdout"],
