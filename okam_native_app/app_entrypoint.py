@@ -554,7 +554,6 @@ def _build_bridge(
             camera_password,
             environment=p2p_environment(),
             account_user_id=device.account_user_id,
-            account_token=device.account_token,
             virtual_uid=device.uid if client_id != device.uid else "",
         )
 
@@ -596,7 +595,6 @@ def run_requested_channel_probe(cameras: list[tuple[str, AccountDevice]]) -> Non
                 password,
                 environment=p2p_environment(),
                 account_user_id=device.account_user_id,
-                account_token=device.account_token,
                 virtual_uid=device.uid if client_id != device.uid else "",
             )
         except P2PError:
