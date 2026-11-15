@@ -20,6 +20,7 @@ from okam_native.account import AccountDevice, AccountError, Eye4AccountClient
 from okam_native.bridge import CameraBridge, QuietThreadingHTTPServer, make_handler
 from okam_native.p2p import (
     P2PError,
+    _valid_account_token,
     channel_probe_lines,
     diagnostic_line,
     get_service_parameter,
@@ -279,10 +280,20 @@ def enumerate_account() -> list[tuple[str, AccountDevice]]:
     print(
         f"account_enumerated=true device_count={len(devices)} "
         f"camera_count={len(cameras)} "
-        f"aliases={','.join(alias for alias, _device in cameras)}",
+        f"aliases={','.join(alias for alias, _device in cameras)} "
+        f"account_token={account_token_state(devices)}",
         flush=True,
     )
     return cameras
+
+
+def account_token_state(devices: list[AccountDevice]) -> str:
+    """`valid`, `invalid` or `absent`; never the token itself."""
+
+    token = next((device.account_token for device in devices if device.account_token), "")
+    if not token:
+        return "absent"
+    return "valid" if _valid_account_token(token) else "invalid"
 
 
 def p2p_environment() -> dict[str, str]:
