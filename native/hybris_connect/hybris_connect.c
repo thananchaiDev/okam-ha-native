@@ -927,11 +927,6 @@ int main(int argc, char **argv) {
             send_cgi(client_write_cgi, client, PRE_LIVE_COMMAND);
             stream_start_sent = send_cgi(client_write_cgi, client,
                                          "livestream.cgi?streamid=10&substream=2&");
-            if (stream_start_sent && vuid_status_command[0] != 0) {
-                send_cgi(client_write_cgi, client, VUID_PARAMS_COMMAND);
-                send_cgi(client_write_cgi, client, vuid_status_command);
-                send_cgi(client_write_cgi, client, VUID_LIGHT_COMMAND);
-            }
             if (stream_start_sent) {
                 if (stream_stdout) {
                     signal(SIGPIPE, SIG_IGN);
