@@ -542,6 +542,7 @@ def _build_bridge(
             service_parameter,
             camera_password,
             environment=p2p_environment(),
+            account_user_id=device.account_user_id,
         )
 
     session = NativeStreamSession(
@@ -581,6 +582,7 @@ def run_requested_channel_probe(cameras: list[tuple[str, AccountDevice]]) -> Non
                 get_service_parameter(client_id),
                 password,
                 environment=p2p_environment(),
+                account_user_id=device.account_user_id,
             )
         except P2PError:
             print(f"channel_probe camera={alias} failed=true", flush=True)

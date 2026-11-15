@@ -413,3 +413,30 @@ def test_channel_probe_lines_report_status_flags_and_command_results() -> None:
     )
     assert "last_result=-" in lines[3]
     assert all("password" not in line and "alias=7" not in line for line in lines)
+
+
+def test_open_stream_process_appends_a_numeric_account_user_id(monkeypatch) -> None:
+    from okam_native.p2p import _field
+
+    recorded = {}
+
+    class Input:
+        def write(self, value):
+            recorded["input"] = value
+
+        def close(self):
+            pass
+
+    class Process:
+        stdin = Input()
+        stdout = object()
+        stderr = object()
+
+    monkeypatch.setattr(subprocess, "Popen", lambda command, **kwargs: Process())
+    base = _field("id") + _field("param") + _field("pw")
+    open_stream_process("/h", "/l", "id", "param", "pw", environment={}, account_user_id="1234")
+    assert recorded["input"] == base + _field("1234")
+    open_stream_process("/h", "/l", "id", "param", "pw", environment={}, account_user_id="12ab")
+    assert recorded["input"] == base
+    open_stream_process("/h", "/l", "id", "param", "pw", environment={})
+    assert recorded["input"] == base
