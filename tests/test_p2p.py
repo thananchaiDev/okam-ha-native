@@ -380,3 +380,36 @@ def test_channel_probe_lines_include_nvr_live_start_results() -> None:
         "ch2=4096b/magic=a815aa55/type=0"
     )
     assert lines[2] == "channel_probe camera=side nvr_chns=1 streammask=1 start_sent=false channels=none"
+
+
+def test_channel_probe_lines_report_status_flags_and_command_results() -> None:
+    from okam_native.p2p import channel_probe_lines
+
+    payload = {
+        "connected": True,
+        "authenticated": True,
+        "login_result": 0,
+        "status": {
+            "requested": True,
+            "responses": 2,
+            "flags": {"support_mutil_sensor_stream": 1, "dev_sensor_num": 3,
+                      "alias": 7, "password": 1234},
+        },
+        "probes": [
+            {"substream": 2, "start_sent": True, "responses": 1,
+             "last_command": 24631, "last_result": -1, "channels": []},
+            {"substream": 1, "start_sent": True, "responses": 0,
+             "last_command": 0, "last_result": None, "channels": []},
+        ],
+    }
+    lines = channel_probe_lines("side", payload)
+    assert lines[1] == (
+        "channel_probe camera=side status requested=true responses=2 "
+        "flags=support_mutil_sensor_stream=1,dev_sensor_num=3"
+    )
+    assert lines[2] == (
+        "channel_probe camera=side substream=2 start_sent=true responses=1 "
+        "last_command=24631 last_result=-1 channels=none"
+    )
+    assert "last_result=-" in lines[3]
+    assert all("password" not in line and "alias=7" not in line for line in lines)

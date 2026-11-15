@@ -416,6 +416,23 @@ def run_channel_probe(
     return payload
 
 
+# Capability flags from get_status.cgi that decide how the official app plays
+# a multi-sensor camera. Anything else the helper might report is dropped.
+PROBE_STATUS_FLAGS = (
+    "support_mutil_sensor_stream",
+    "dev_sensor_num",
+    "support_binocular_mutil",
+    "splitScreen",
+    "support_dual_sensor_stitch",
+    "support_three_sensor_binocular",
+    "sensornum",
+    "binocular_num",
+    "support_binocular",
+    "support_fix_sensor",
+    "pininpic_sensor",
+)
+
+
 def channel_probe_lines(alias: str, payload: dict[str, object]) -> list[str]:
     """Sanitized log lines: counters and frame-header words only."""
 
@@ -430,6 +447,20 @@ def channel_probe_lines(alias: str, payload: dict[str, object]) -> list[str]:
         f"authenticated={flag(payload.get('authenticated'))} "
         f"login_result={number(payload.get('login_result'))}"
     ]
+    status = payload.get("status")
+    if isinstance(status, dict):
+        flags = status.get("flags")
+        found = []
+        if isinstance(flags, dict):
+            for key in PROBE_STATUS_FLAGS:
+                value = flags.get(key)
+                if isinstance(value, int) and not isinstance(value, bool):
+                    found.append(f"{key}={value}")
+        lines.append(
+            f"channel_probe camera={alias} status requested={flag(status.get('requested'))} "
+            f"responses={number(status.get('responses'))} "
+            f"flags={','.join(found) if found else 'none'}"
+        )
     probes = payload.get("probes")
     nvr_probes = payload.get("nvr_probes")
     tagged = [("substream", probe) for probe in (probes if isinstance(probes, list) else [])]
@@ -446,6 +477,12 @@ def channel_probe_lines(alias: str, payload: dict[str, object]) -> list[str]:
         else:
             parts.append(f"substream={number(probe.get('substream'))}")
         parts.append(f"start_sent={flag(probe.get('start_sent'))}")
+        if "responses" in probe:
+            parts.append(
+                f"responses={number(probe.get('responses'))} "
+                f"last_command={number(probe.get('last_command'))} "
+                f"last_result={number(probe.get('last_result'))}"
+            )
         channels = probe.get("channels")
         found = [c for c in channels if isinstance(c, dict)] if isinstance(channels, list) else []
         if not found:
