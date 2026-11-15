@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.15
+
+- Stop sending eye4_authentication entirely: cameras reject the account-service token the bridge has, and VUID cameras that streamed before stopped after receiving it. The helper support stays for when the right token is known.
+
 ## 1.3.14
 
 - Fix: send eye4_authentication only to multi-sensor (VUID) cameras. Ordinary cameras rejected the token and some then stopped streaming (regression in 1.3.12).
