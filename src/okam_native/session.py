@@ -24,6 +24,7 @@ SUMMARY_LOG_FIELDS = (
     "login_sent",
     "login_response_received",
     "authenticated",
+    "eye4_auth",
     "login_command",
     "login_result",
     "stream_start_sent",

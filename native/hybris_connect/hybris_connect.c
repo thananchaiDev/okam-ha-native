@@ -316,7 +316,7 @@ static char vuid_status_command[80];
 
 static void set_vuid_status_command(const char *virtual_uid) {
     vuid_status_command[0] = 0;
-    if (virtual_uid == NULL) return;
+    if (virtual_uid == NULL || strcmp(virtual_uid, "-") == 0) return;
     size_t size = strlen(virtual_uid);
     if (size == 0 || size > 32) return;
     for (size_t i = 0; i < size; ++i) {
@@ -344,9 +344,32 @@ static void set_account_user_id(const char *user_id) {
     snprintf(user_id_suffix, sizeof(user_id_suffix), "userId=%s&", user_id);
 }
 
+/* `eye4_authentication.cgi?loginAccount=<user id>&loginToken=<token>&`, sent
+ * by the official PC client right after connecting. Multi-sensor cameras
+ * answer commands without it but stream video only to sessions that passed
+ * it. Empty when no account id or token was supplied. */
+static char eye4_auth_command[400];
+
+static void set_eye4_auth_command(const char *user_id, const char *token) {
+    eye4_auth_command[0] = 0;
+    if (user_id == NULL || token == NULL) return;
+    size_t user_size = strlen(user_id);
+    size_t token_size = strlen(token);
+    if (user_size == 0 || user_size > 20 || token_size == 0 || token_size > 256) return;
+    for (size_t i = 0; i < user_size; ++i) {
+        if (user_id[i] < '0' || user_id[i] > '9') return;
+    }
+    for (size_t i = 0; i < token_size; ++i) {
+        unsigned char c = (unsigned char)token[i];
+        if (c < 0x21 || c > 0x7e || c == '&' || c == '#' || c == '?' || c == ';') return;
+    }
+    snprintf(eye4_auth_command, sizeof(eye4_auth_command),
+             "eye4_authentication.cgi?loginAccount=%s&loginToken=%s&", user_id, token);
+}
+
 static bool send_cgi(client_write_cgi_fn write_cgi, void *client, const char *command) {
     if (user_id_suffix[0] == 0) return write_cgi(client, command, 5000);
-    char full[256];
+    char full[512];
     int written = snprintf(full, sizeof(full), "%s%s", command, user_id_suffix);
     if (written < 0 || (size_t)written >= sizeof(full)) return write_cgi(client, command, 5000);
     bool ok = write_cgi(client, full, 5000);
@@ -561,6 +584,29 @@ static void note_command_response(channel_probe_result *result,
     }
 }
 
+/* Send eye4_authentication.cgi and wait briefly for its `eye4_auth=` reply.
+ * Returns -1 when not sent (no token), 0 when sent without a positive reply,
+ * and 1 when the camera answered eye4_auth=1. Other command replies that
+ * arrive meanwhile are discarded. */
+static int eye4_authenticate(client_read_fn client_read, client_write_cgi_fn client_write_cgi,
+                             void *client) {
+    if (eye4_auth_command[0] == 0) return -1;
+    bool sent = send_cgi(client_write_cgi, client, eye4_auth_command);
+    memset(eye4_auth_command, 0, sizeof(eye4_auth_command));
+    if (!sent) return 0;
+    static unsigned char payload[MAX_COMMAND_BYTES + 1];
+    time_t deadline = time(NULL) + 4;
+    while (time(NULL) <= deadline) {
+        unsigned int command = 0;
+        size_t length = 0;
+        if (!read_command_frame(client_read, client, payload, sizeof(payload),
+                                &command, &length)) continue;
+        const char *found = strstr((const char *)payload, "eye4_auth=");
+        if (found != NULL) return found[10] == '1' ? 1 : 0;
+    }
+    return 0;
+}
+
 static void probe_status(client_read_fn client_read, client_write_cgi_fn client_write_cgi,
                          void *client, status_probe_result *status) {
     unsigned char *payload = malloc(MAX_COMMAND_BYTES);
@@ -741,6 +787,13 @@ int main(int argc, char **argv) {
      * on the client right after client_create; VUID cameras answer commands
      * without it but send no video. */
     char *virtual_uid = account_user_id != NULL ? read_field() : NULL;
+    /* Optional sixth field: the account login token for eye4_authentication. */
+    char *account_token = virtual_uid != NULL ? read_field() : NULL;
+    set_eye4_auth_command(account_user_id, account_token);
+    if (account_token != NULL) {
+        memset(account_token, 0, strlen(account_token));
+        free(account_token);
+    }
     free(account_user_id);
     if (uid == NULL || service_parameter == NULL ||
         (authenticate && device_password == NULL) || !initialize_stack_guard()) {
@@ -806,7 +859,7 @@ int main(int argc, char **argv) {
     void *client = client_create(uid, NULL);
     memset(uid, 0, strlen(uid));
     free(uid);
-    if (client != NULL && virtual_uid != NULL) {
+    if (client != NULL && virtual_uid != NULL && strcmp(virtual_uid, "-") != 0) {
         client_setvuid_fn client_setvuid =
             (client_setvuid_fn)android_dlsym(library, "client_setvuid");
         if (client_setvuid != NULL) client_setvuid(client, virtual_uid);
@@ -823,6 +876,7 @@ int main(int argc, char **argv) {
     bool login_sent = false;
     bool login_response_received = false;
     bool authenticated = false;
+    int eye4_auth = -1;
     uint16_t login_command = 0;
     int login_result = 0;
     bool stream_start_sent = false;
@@ -853,6 +907,9 @@ int main(int argc, char **argv) {
                     client_read, client, &login_command, &login_result);
                 authenticated = login_response_received && login_result == 0;
             }
+        }
+        if (connected && authenticated) {
+            eye4_auth = eye4_authenticate(client_read, client_write_cgi, client);
         }
         if (connected && authenticated && channel_probe) {
             probe_status(client_read, client_write_cgi, client, &status_result);
@@ -893,6 +950,7 @@ int main(int argc, char **argv) {
         client_destroy(client);
     }
     memset(vuid_status_command, 0, sizeof(vuid_status_command));
+    memset(eye4_auth_command, 0, sizeof(eye4_auth_command));
     memset(service_parameter, 0, strlen(service_parameter));
     free(service_parameter);
     if (device_password != NULL) {
@@ -902,7 +960,7 @@ int main(int argc, char **argv) {
     if (stream_stdout) {
         fprintf(stderr,
                 "{\"connected\":%s,\"connect_state\":%d,\"login_sent\":%s,"
-                "\"login_response_received\":%s,\"authenticated\":%s,"
+                "\"login_response_received\":%s,\"authenticated\":%s,\"eye4_auth\":%d,"
                 "\"login_command\":%u,\"login_result\":%d,"
                 "\"stream_start_sent\":%s,\"stream_stop_sent\":%s,"
                 "\"h264_received\":%s,\"h264_frames\":%u,\"h264_bytes\":%llu,"
@@ -911,7 +969,7 @@ int main(int argc, char **argv) {
                 "\"last_frame_type\":%u,\"disconnected\":%s}\n",
                 connected ? "true" : "false", state, login_sent ? "true" : "false",
                 login_response_received ? "true" : "false",
-                authenticated ? "true" : "false", login_command, login_result,
+                authenticated ? "true" : "false", eye4_auth, login_command, login_result,
                 stream_start_sent ? "true" : "false", stream_stop_sent ? "true" : "false",
                 h264_received ? "true" : "false", h264_frames, h264_bytes,
                 keyframe_seen ? "true" : "false", h265_frames,

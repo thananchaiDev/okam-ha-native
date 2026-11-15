@@ -467,3 +467,19 @@ def test_open_stream_process_appends_the_virtual_id_after_the_user_id(monkeypatc
     open_stream_process("/h", "/l", "real", "param", "pw", environment={},
                         virtual_uid="VIRT1234567X")
     assert recorded["input"] == base + _field("-") + _field("VIRT1234567X")
+    open_stream_process("/h", "/l", "real", "param", "pw", environment={},
+                        account_user_id="42", account_token="tok.en-1")
+    assert recorded["input"] == base + _field("42") + _field("-") + _field("tok.en-1")
+    open_stream_process("/h", "/l", "real", "param", "pw", environment={},
+                        account_user_id="42", virtual_uid="VIRT1234567X",
+                        account_token="tok.en-1")
+    assert recorded["input"] == (
+        base + _field("42") + _field("VIRT1234567X") + _field("tok.en-1")
+    )
+    # A token is never sent without a user id, nor when it could break the CGI.
+    open_stream_process("/h", "/l", "real", "param", "pw", environment={},
+                        account_token="tok.en-1")
+    assert recorded["input"] == base
+    open_stream_process("/h", "/l", "real", "param", "pw", environment={},
+                        account_user_id="42", account_token="a&b")
+    assert recorded["input"] == base + _field("42")

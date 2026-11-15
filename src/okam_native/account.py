@@ -31,6 +31,10 @@ class AccountDevice:
     # `userId` with every camera command; newer cameras bound to the account
     # (VUID devices) stream video only to commands that carry it.
     account_user_id: str = field(default="", repr=False)
+    # The account login token. The official PC client sends it to each camera
+    # in eye4_authentication.cgi right after connecting; multi-sensor cameras
+    # stream video only to sessions that passed this check.
+    account_token: str = field(default="", repr=False)
 
 
 OpenRequest = Callable[[urllib.request.Request, float], bytes]
@@ -112,6 +116,7 @@ class Eye4AccountClient:
         )
         if not isinstance(login, dict) or not isinstance(login.get("token"), str):
             raise AccountError("O-KAM account credentials were rejected")
+        account_token = login["token"]
 
         devices = self._request_json(
             "GET",
@@ -135,6 +140,7 @@ class Eye4AccountClient:
                     name=name if isinstance(name, str) and name else "O-KAM camera",
                     device_password=device_password if isinstance(device_password, str) else "",
                     account_user_id=str(user_id),
+                    account_token=account_token,
                 )
             )
         return result
