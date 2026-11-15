@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.12
+
+- Authenticate each camera session with the O-KAM account (eye4_authentication) right after login, like the official PC client. Multi-sensor cameras send video only to authenticated sessions.
+- The live-stream summary log now includes `eye4_auth` (-1 not sent, 0 not confirmed, 1 confirmed).
+
 ## 1.3.11
 
 - Multi-sensor (VUID) cameras: after starting live view, send the same camera-parameters, VUID status and light-state queries the official PC client sends before its first video frame.
