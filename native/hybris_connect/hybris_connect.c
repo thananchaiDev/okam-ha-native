@@ -44,6 +44,7 @@ typedef void *(*client_create_fn)(const char *, const char *);
 typedef int (*client_connect_fn)(void *, int, const char *, int);
 typedef bool (*client_login_fn)(void *, const char *, const char *);
 typedef bool (*client_write_cgi_fn)(void *, const char *, int);
+typedef int (*client_setvuid_fn)(void *, const char *);
 typedef int (*client_read_fn)(void *, int, void *, int, int, int *);
 typedef bool (*client_disconnect_fn)(void *);
 typedef void (*client_destroy_fn)(void *);
@@ -712,6 +713,11 @@ int main(int argc, char **argv) {
     /* Optional fourth field: the account's numeric user id. */
     char *account_user_id = authenticate && device_password != NULL ? read_field() : NULL;
     set_account_user_id(account_user_id);
+    /* Optional fifth field: the virtual device id (VUID) the account lists for
+     * this camera when the transport id differs. The official app registers it
+     * on the client right after client_create; VUID cameras answer commands
+     * without it but send no video. */
+    char *virtual_uid = account_user_id != NULL ? read_field() : NULL;
     free(account_user_id);
     if (uid == NULL || service_parameter == NULL ||
         (authenticate && device_password == NULL) || !initialize_stack_guard()) {
@@ -777,6 +783,16 @@ int main(int argc, char **argv) {
     void *client = client_create(uid, NULL);
     memset(uid, 0, strlen(uid));
     free(uid);
+    if (client != NULL && virtual_uid != NULL) {
+        client_setvuid_fn client_setvuid =
+            (client_setvuid_fn)android_dlsym(library, "client_setvuid");
+        if (client_setvuid != NULL) client_setvuid(client, virtual_uid);
+    }
+    if (virtual_uid != NULL) {
+        memset(virtual_uid, 0, strlen(virtual_uid));
+        free(virtual_uid);
+        virtual_uid = NULL;
+    }
     int state = -1;
     bool connected = false;
     bool disconnected = false;
