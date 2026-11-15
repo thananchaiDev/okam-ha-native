@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.11
+
+- Multi-sensor (VUID) cameras: after starting live view, send the same camera-parameters, VUID status and light-state queries the official PC client sends before its first video frame.
+
 ## 1.3.10
 
 - Registers a camera's virtual device id (VUID) on the P2P client with
