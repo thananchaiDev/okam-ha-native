@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.8
+
+- Supports multi-sensor cameras that sent no video. A trace of the official
+  O-KAM Pro PC client showed it sends `trans_cmd_string.cgi?cmd=8000&command=0`
+  right before `livestream.cgi`; the bridge now does the same for every camera
+  (the reply is ignored).
+- Forwards a bare Annex-B video stream when a camera sends one without the
+  usual 32-byte frame header on the video channel.
+- The channel probe sends the same pre-live command first.
+
 ## 1.3.7
 
 - The `probe_camera` diagnostic now reads the camera's `get_status.cgi`
